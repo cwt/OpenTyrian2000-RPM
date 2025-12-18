@@ -1,0 +1,182 @@
+From 3f8a4211df168cd3ca2b244daf97c73794da0fd7 Mon Sep 17 00:00:00 2001
+From: Chaiwat Suttipongsakul <cwt@bashell.com>
+Date: Thu, 18 Dec 2025 12:45:07 +0700
+Subject: [PATCH] Add High DPI support
+
+- Add SCALE_INTEGER_HIDPI scaling mode
+- Add DPI scaling variables and functions
+- Update calc_dst_render_rect to handle HiDPI mode
+- Update init_video, reinit_fullscreen, and init_scaler functions
+- Add update_dpi_scale and apply_dpi_scale helper functions
+---
+ src/video.c | 83 +++++++++++++++++++++++++++++++++++++++++++++++++++--
+ src/video.h |  9 ++++++
+ 2 files changed, 90 insertions(+), 2 deletions(-)
+
+diff --git a/src/video.c b/src/video.c
+index 8d6d56c..1b6a60f 100644
+--- a/src/video.c
++++ b/src/video.c
+@@ -34,12 +34,17 @@ const char *const scaling_mode_names[ScalingMode_MAX] = {
+ 	"Integer",
+ 	"Fit 8:5",
+ 	"Fit 4:3",
++	"Integer (HiDPI)",
+ };
+ 
+ int fullscreen_display;
+ ScalingMode scaling_mode = SCALE_INTEGER;
+ static SDL_Rect last_output_rect = { 0, 0, vga_width, vga_height };
+ 
++// High DPI support variables
++float dpi_scale_x = 1.0f, dpi_scale_y = 1.0f;
++int window_width = vga_width, window_height = vga_height;
++
+ SDL_Surface *VGAScreen, *VGAScreenSeg;
+ SDL_Surface *VGAScreen2;
+ SDL_Surface *game_screen;
+@@ -105,6 +110,9 @@ void init_video(void)
+ 
+ 	SDL_ShowWindow(main_window);
+ 
++	// Update DPI scaling after window is shown
++	update_dpi_scale();
++
+ 	SDL_SetRenderDrawColor(main_window_renderer, 0, 0, 0, 255);
+ 	SDL_RenderClear(main_window_renderer);
+ 	SDL_RenderPresent(main_window_renderer);
+@@ -205,7 +213,20 @@ void reinit_fullscreen(int new_display)
+ 	}
+ 
+ 	SDL_SetWindowFullscreen(main_window, SDL_FALSE);
+-	SDL_SetWindowSize(main_window, scalers[scaler].width, scalers[scaler].height);
++
++	// Set window size based on current scaler and DPI mode
++	int window_scaler_w = scalers[scaler].width;
++	int window_scaler_h = scalers[scaler].height;
++
++	if (scaling_mode == SCALE_INTEGER_HIDPI)
++	{
++		// For HiDPI mode, get the actual display size
++		update_dpi_scale();
++		window_scaler_w = (int)(vga_width * ceilf(dpi_scale_x));
++		window_scaler_h = (int)(vga_height * ceilf(dpi_scale_y));
++	}
++
++	SDL_SetWindowSize(main_window, window_scaler_w, window_scaler_h);
+ 
+ 	if (fullscreen_display == -1)
+ 	{
+@@ -267,7 +288,18 @@ bool init_scaler(unsigned int new_scaler)
+ 	{
+ 		// Changing scalers, when not in fullscreen mode, forces the window
+ 		// to resize to exactly match the scaler's output dimensions.
+-		SDL_SetWindowSize(main_window, w, h);
++		if (scaling_mode == SCALE_INTEGER_HIDPI)
++		{
++			// For HiDPI mode, calculate scaled dimensions
++			update_dpi_scale();
++			int scaled_w = (int)(vga_width * ceilf(dpi_scale_x));
++			int scaled_h = (int)(vga_height * ceilf(dpi_scale_y));
++			SDL_SetWindowSize(main_window, scaled_w, scaled_h);
++		}
++		else
++		{
++			SDL_SetWindowSize(main_window, w, h);
++		}
+ 		window_center_in_display(window_get_display_index());
+ 	}
+ 
+@@ -370,6 +402,29 @@ static void calc_dst_render_rect(SDL_Surface *const src_surface, SDL_Rect *const
+ 			dst_rect->h = win_h;
+ 		}
+ 		break;
++	case SCALE_INTEGER_HIDPI:
++		// For HiDPI displays, scale to integer multiples but account for DPI
++		update_dpi_scale(); // Update DPI scaling factors
++		dst_rect->w = src_surface->w * (int)ceilf(dpi_scale_x);
++		dst_rect->h = src_surface->h * (int)ceilf(dpi_scale_y);
++		// Ensure the scaled size fits within the window
++		while (dst_rect->w <= win_w && dst_rect->h <= win_h)
++		{
++			if (dst_rect->w == win_w || dst_rect->h == win_h)
++				break;
++			dst_rect->w += src_surface->w;
++			dst_rect->h += src_surface->h;
++		}
++		if (dst_rect->w > win_w || dst_rect->h > win_h)
++		{
++			dst_rect->w -= src_surface->w;
++			dst_rect->h -= src_surface->h;
++		}
++		if (dst_rect->w < src_surface->w)
++			dst_rect->w = src_surface->w;
++		if (dst_rect->h < src_surface->h)
++			dst_rect->h = src_surface->h;
++		break;
+ 	case ScalingMode_MAX:
+ 		assert(false);
+ 		break;
+@@ -420,3 +475,27 @@ void scaleWindowDistanceToScreen(Sint32 *const inout_x, Sint32 *const inout_y)
+ 	*inout_x = (2 * *inout_x + 1) * VGAScreen->w / (2 * last_output_rect.w);
+ 	*inout_y = (2 * *inout_y + 1) * VGAScreen->h / (2 * last_output_rect.h);
+ }
++
++/** Update DPI scaling based on current window size */
++void update_dpi_scale(void)
++{
++	if (main_window)
++	{
++		int pixel_width, pixel_height;
++		SDL_GetWindowSize(main_window, &window_width, &window_height);
++		SDL_GL_GetDrawableSize(main_window, &pixel_width, &pixel_height);
++
++		dpi_scale_x = (float)pixel_width / (float)window_width;
++		dpi_scale_y = (float)pixel_height / (float)window_height;
++	}
++}
++
++/** Apply DPI scaling to dimensions */
++void apply_dpi_scale(int *width, int *height)
++{
++	if (scaling_mode == SCALE_INTEGER_HIDPI)
++	{
++		*width = (int)(*width * dpi_scale_x);
++		*height = (int)(*height * dpi_scale_y);
++	}
++}
+diff --git a/src/video.h b/src/video.h
+index 175aba6..6d60a65 100644
+--- a/src/video.h
++++ b/src/video.h
+@@ -31,6 +31,7 @@ typedef enum {
+ 	SCALE_INTEGER,
+ 	SCALE_ASPECT_8_5,
+ 	SCALE_ASPECT_4_3,
++	SCALE_INTEGER_HIDPI,
+ 	ScalingMode_MAX
+ } ScalingMode;
+ 
+@@ -46,6 +47,10 @@ extern SDL_Surface *VGAScreen2;
+ extern SDL_Window *main_window;
+ extern SDL_PixelFormat *main_window_tex_format;
+ 
++// High DPI support variables
++extern float dpi_scale_x, dpi_scale_y;
++extern int window_width, window_height;
++
+ void init_video(void);
+ 
+ void video_on_win_resize(void);
+@@ -63,4 +68,8 @@ void mapScreenPointToWindow(Sint32 *inout_x, Sint32 *inout_y);
+ void mapWindowPointToScreen(Sint32 *inout_x, Sint32 *inout_y);
+ void scaleWindowDistanceToScreen(Sint32 *inout_x, Sint32 *inout_y);
+ 
++// High DPI support functions
++void update_dpi_scale(void);
++void apply_dpi_scale(int *width, int *height);
++
+ #endif /* VIDEO_H */
+-- 
+2.52.0
+

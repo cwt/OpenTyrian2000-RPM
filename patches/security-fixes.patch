@@ -1,0 +1,179 @@
+From e94e3c9ff7ba0b60db174a83f32ad39a5d463d3d Mon Sep 17 00:00:00 2001
+From: OpenTyrian Assistant <assistant@example.com>
+Date: Thu, 18 Dec 2025 15:38:16 +0700
+Subject: [PATCH] Fix potential buffer overflow vulnerabilities
+
+- Replace unsafe strcpy calls with SDL_strlcpy/snprintf to prevent buffer overflows
+- Fix network input handling to prevent potential remote buffer overflows
+- Add proper bounds checking for save file name fields
+- Limit network name lengths to prevent buffer overflows
+---
+ src/config.c    | 10 +++++-----
+ src/game_menu.c | 14 +++++++-------
+ src/network.c   | 16 ++++++++++------
+ src/params.c    | 16 ++++++++++++----
+ 4 files changed, 34 insertions(+), 22 deletions(-)
+
+diff --git a/src/config.c b/src/config.c
+index 9e7b00a..078271b 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -967,11 +967,11 @@ void JE_loadConfiguration(void)
+ 			if (z % 6 > 2)
+ 			{
+ 				saveFiles[z].highScore2 = ((mt_rand() % 20) + 1) * 1000;
+-				strcpy(saveFiles[z].highScoreName, defaultTeamNames[mt_rand() % COUNTOF(defaultTeamNames)]);
++				SDL_strlcpy(saveFiles[z].highScoreName, defaultTeamNames[mt_rand() % COUNTOF(defaultTeamNames)], sizeof(saveFiles[z].highScoreName));
+ 			}
+ 			else
+ 			{
+-				strcpy(saveFiles[z].highScoreName, defaultHighScoreNames[mt_rand() % COUNTOF(defaultHighScoreNames)]);
++				SDL_strlcpy(saveFiles[z].highScoreName, defaultHighScoreNames[mt_rand() % COUNTOF(defaultHighScoreNames)], sizeof(saveFiles[z].highScoreName));
+ 			}
+ 		}
+ 
+@@ -981,7 +981,7 @@ void JE_loadConfiguration(void)
+ 			{
+ 				// Timed Battle scores
+ 				t2kHighScores[z][y].score = ((mt_rand() % 50) + 1) * 100;
+-				strcpy(t2kHighScores[z][y].playerName, defaultHighScoreNames[mt_rand() % COUNTOF(defaultHighScoreNames)]);
++				SDL_strlcpy(t2kHighScores[z][y].playerName, defaultHighScoreNames[mt_rand() % COUNTOF(defaultHighScoreNames)], sizeof(t2kHighScores[z][y].playerName));
+ 			}
+ 		}
+ 		for (z = 10; z < 20; ++z)
+@@ -991,9 +991,9 @@ void JE_loadConfiguration(void)
+ 				// Main Game scores
+ 				t2kHighScores[z][y].score = ((mt_rand() % 20) + 1) * 1000;
+ 				if (z & 1)
+-					strcpy(t2kHighScores[z][y].playerName, defaultTeamNames[mt_rand() % COUNTOF(defaultTeamNames)]);
++					SDL_strlcpy(t2kHighScores[z][y].playerName, defaultTeamNames[mt_rand() % COUNTOF(defaultTeamNames)], sizeof(t2kHighScores[z][y].playerName));
+ 				else
+-					strcpy(t2kHighScores[z][y].playerName, defaultHighScoreNames[mt_rand() % COUNTOF(defaultHighScoreNames)]);
++					SDL_strlcpy(t2kHighScores[z][y].playerName, defaultHighScoreNames[mt_rand() % COUNTOF(defaultHighScoreNames)], sizeof(t2kHighScores[z][y].playerName));
+ 			}
+ 		}
+ 	}
+diff --git a/src/game_menu.c b/src/game_menu.c
+index b1bd0ae..6f76a0e 100644
+--- a/src/game_menu.c
++++ b/src/game_menu.c
+@@ -357,7 +357,7 @@ void JE_itemScreen(void)
+ 				else if (saveFiles[x-2].level == 0)
+ 					strcpy(tempStr, miscText[3-1]);
+ 				else
+-					strcpy(tempStr, saveFiles[x-2].name);
++					SDL_strlcpy(tempStr, saveFiles[x-2].name, sizeof(tempStr));
+ 
+ 				int tempY = 38 + (x - min)*11;
+ 
+@@ -376,7 +376,7 @@ void JE_itemScreen(void)
+ 					{
+ 						char buf[20];
+ 
+-						strcpy(tempStr, saveFiles[x-2].levelName);
++						SDL_strlcpy(tempStr, saveFiles[x-2].levelName, sizeof(tempStr));
+ 
+ 						snprintf(buf, sizeof buf, "%s%d", miscTextB[1-1], saveFiles[x-2].episode);
+ 						JE_textShade(VGAScreen, 297, tempY, buf, temp2 / 16, temp2 % 16 - 8, DARKEN);
+@@ -560,21 +560,21 @@ void JE_itemScreen(void)
+ 						if (temp > 90)
+ 							snprintf(tempStr, sizeof(tempStr), "Custom Ship %d", temp - 90);
+ 						else
+-							strcpy(tempStr, ships[temp].name);
++							SDL_strlcpy(tempStr, ships[temp].name, sizeof(tempStr));
+ 						break;
+ 					case 2: /* front and rear weapon */
+ 					case 3:
+-						strcpy(tempStr, weaponPort[temp].name);
++						SDL_strlcpy(tempStr, weaponPort[temp].name, sizeof(tempStr));
+ 						break;
+ 					case 4: /* shields */
+-						strcpy(tempStr, shields[temp].name);
++						SDL_strlcpy(tempStr, shields[temp].name, sizeof(tempStr));
+ 						break;
+ 					case 5: /* generator */
+-						strcpy(tempStr, powerSys[temp].name);
++						SDL_strlcpy(tempStr, powerSys[temp].name, sizeof(tempStr));
+ 						break;
+ 					case 6: /* sidekicks */
+ 					case 7:
+-						strcpy(tempStr, options[temp].name);
++						SDL_strlcpy(tempStr, options[temp].name, sizeof(tempStr));
+ 						break;
+ 				}
+ 				if (tempW == curSel[curMenu]-1)
+diff --git a/src/network.c b/src/network.c
+index b0d3bc7..8e6e22d 100644
+--- a/src/network.c
++++ b/src/network.c
+@@ -614,8 +614,8 @@ connect_reset:
+ 	SDLNet_Write16(network_delay,   &packet_out_temp->data[6]);
+ 	SDLNet_Write16(episodes_local,  &packet_out_temp->data[8]);
+ 	SDLNet_Write16(thisPlayerNum,   &packet_out_temp->data[10]);
+-	strcpy((char *)&packet_out_temp->data[12], network_player_name);
+-	network_send(12 + strlen(network_player_name) + 1); // PACKET_CONNECT
++	snprintf((char *)&packet_out_temp->data[12], NET_PACKET_SIZE - 12, "%s", network_player_name);
++	network_send(12 + strlen((char *)&packet_out_temp->data[12]) + 1); // PACKET_CONNECT
+ 
+ 	// until opponent sends connect packet
+ 	while (true)
+@@ -661,8 +661,12 @@ connect_again:
+ 		episodes >>= 1;
+ 	}
+ 
+-	network_opponent_name = malloc(packet_in[0]->len - 12 + 1);
+-	strcpy(network_opponent_name, (char *)&packet_in[0]->data[12]);
++	{
++		size_t len = packet_in[0]->len - 12;
++		if (len > 255) len = 255;  // Limit name length for safety
++		network_opponent_name = malloc(len + 1);
++		snprintf(network_opponent_name, len + 1, "%.*s", (int)len, (char *)&packet_in[0]->data[12]);
++	}
+ 
+ 	network_update();
+ 
+@@ -691,8 +695,8 @@ connect_again:
+ 	SDLNet_Write16(network_delay,   &packet_out_temp->data[6]);
+ 	SDLNet_Write16(episodes_local,  &packet_out_temp->data[8]);
+ 	SDLNet_Write16(thisPlayerNum,   &packet_out_temp->data[10]);
+-	strcpy((char *)&packet_out_temp->data[12], network_player_name);
+-	network_send(12 + strlen(network_player_name) + 1); // PACKET_CONNECT
++	snprintf((char *)&packet_out_temp->data[12], NET_PACKET_SIZE - 12, "%s", network_player_name);
++	network_send(12 + strlen((char *)&packet_out_temp->data[12]) + 1); // PACKET_CONNECT
+ 
+ 	connected = true;
+ 
+diff --git a/src/params.c b/src/params.c
+index a42ac9b..db76038 100644
+--- a/src/params.c
++++ b/src/params.c
+@@ -144,14 +144,22 @@ void JE_paramCheck(int argc, char *argv[])
+ 			}
+ 			else
+ 			{
+-				network_opponent_host = malloc(strlen(option.arg) + 1);
+-				strcpy(network_opponent_host, option.arg);
++				size_t len = strlen(option.arg);
++				if (len > 255) len = 255;  // Limit host name length
++				network_opponent_host = malloc(len + 1);
++				strncpy(network_opponent_host, option.arg, len);
++				network_opponent_host[len] = '\0';
+ 			}
+ 			break;
+ 			
+ 		case 256: // --net-player-name
+-			network_player_name = malloc(strlen(option.arg) + 1);
+-			strcpy(network_player_name, option.arg);
++			{
++				size_t len = strlen(option.arg);
++				if (len > 20) len = 20;  // Limit player name length based on network.c constraint
++				network_player_name = malloc(len + 1);
++				strncpy(network_player_name, option.arg, len);
++				network_player_name[len] = '\0';
++			}
+ 			break;
+ 			
+ 		case 257: // --net-player-number
+-- 
+2.52.0
+

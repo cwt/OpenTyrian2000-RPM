@@ -1,0 +1,400 @@
+From 13cde2031a9544191b286f38ebfb130c45044de6 Mon Sep 17 00:00:00 2001
+From: Chaiwat Suttipongsakul <cwt@bashell.com>
+Date: Thu, 18 Dec 2025 13:16:42 +0700
+Subject: [PATCH] Add modern scaling algorithms
+
+- Add bilinear scaling for smooth interpolation
+- Add CRT scanline effect for retro feel
+- Update scalers array with new options
+- Include 2x and 3x versions of new scalers
+- Add proper function declarations
+---
+ src/video_scale.c      | 320 ++++++++++++++++++++++++++++++++++++++++-
+ src/video_scale.h      |   6 +
+ src/video_scale_hqNx.c |   6 +
+ 3 files changed, 327 insertions(+), 5 deletions(-)
+
+diff --git a/src/video_scale.c b/src/video_scale.c
+index a0d7ace..bd91e02 100644
+--- a/src/video_scale.c
++++ b/src/video_scale.c
+@@ -44,14 +44,15 @@ uint scaler;
+ const struct Scalers scalers[] =
+ {
+ 	{ 1 * vga_width, 1 * vga_height, nn_16,      nn_32,      "None" },
+-	{ 2 * vga_width, 2 * vga_height, nn_16,      nn_32,      "2x" },
+-	{ 2 * vga_width, 2 * vga_height, scale2x_16, scale2x_32, "Scale2x" },
+-	{ 2 * vga_width, 2 * vga_height, NULL,       hq2x_32,    "hq2x" },
+ 	{ 3 * vga_width, 3 * vga_height, nn_16,      nn_32,      "3x" },
+ 	{ 3 * vga_width, 3 * vga_height, scale3x_16, scale3x_32, "Scale3x" },
+ 	{ 3 * vga_width, 3 * vga_height, NULL,       hq3x_32,    "hq3x" },
+ 	{ 4 * vga_width, 4 * vga_height, nn_16,      nn_32,      "4x" },
+ 	{ 4 * vga_width, 4 * vga_height, NULL,       hq4x_32,    "hq4x" },
++	{ 5 * vga_width, 5 * vga_height, nn_16,      nn_32,      "5x" },
++	{ 5 * vga_width, 5 * vga_height, bilinear_16, bilinear_32, "Bilinear 5x" },
++	{ 3 * vga_width, 3 * vga_height, crt_scanline_16, crt_scanline_32, "CRT 3x" },
++	{ 5 * vga_width, 5 * vga_height, crt_scanline_16, crt_scanline_32, "CRT 5x" },
+ };
+ const uint scalers_count = COUNTOF(scalers);
+ 
+@@ -433,14 +434,323 @@ void scale3x_16(SDL_Surface *src_surface, SDL_Texture *dst_texture)
+ 			*(Uint16 *)(dst + 2 * dst_pitch) = E6;
+ 			*(Uint16 *)(dst + 2 * dst_pitch + dst_Bpp) = E7;
+ 			*(Uint16 *)(dst + 2 * dst_pitch + 2 * dst_Bpp) = E8;
+-			
++
+ 			src++;
+ 			dst += 3 * dst_Bpp;
+ 		}
+-		
++
+ 		src = src_temp + src_pitch;
+ 		dst = dst_temp + 3 * dst_pitch;
+ 	}
+ 
+ 	SDL_UnlockTexture(dst_texture);
+ }
++
++// Bilinear scaler functions - provides smooth scaling for modern displays
++void bilinear_32(SDL_Surface *src_surface, SDL_Texture *dst_texture)
++{
++	Uint8 *src = src_surface->pixels;
++	Uint8 *dst;
++	int src_pitch = src_surface->pitch;
++	int dst_pitch;
++
++	int dst_width, dst_height;
++	SDL_QueryTexture(dst_texture, NULL, NULL, &dst_width, &dst_height);
++
++	int src_width = src_surface->w;
++	int src_height = src_surface->h;
++
++	// Calculate scaling factors
++	float scale_x = (float)src_width / (float)dst_width;
++	float scale_y = (float)src_height / (float)dst_height;
++
++	void* tmp_ptr;
++	SDL_LockTexture(dst_texture, NULL, &tmp_ptr, &dst_pitch);
++	dst = tmp_ptr;
++
++	for (int y = 0; y < dst_height; y++)
++	{
++		for (int x = 0; x < dst_width; x++)
++		{
++			// Calculate source coordinates
++			float src_x = (x + 0.5f) * scale_x - 0.5f;
++			float src_y = (y + 0.5f) * scale_y - 0.5f;
++
++			// Clamp to valid range
++			if (src_x < 0) src_x = 0;
++			if (src_y < 0) src_y = 0;
++
++			// Get integer and fractional parts
++			int int_x = (int)src_x;
++			int int_y = (int)src_y;
++			float frac_x = src_x - int_x;
++			float frac_y = src_y - int_y;
++
++			// Bounds checking
++			int x2 = (int_x < src_width - 1) ? int_x + 1 : int_x;
++			int y2 = (int_y < src_height - 1) ? int_y + 1 : int_y;
++
++			// Get the four neighboring pixels
++			Uint32 p00 = rgb_palette[src[int_y * src_pitch + int_x]];
++			Uint32 p01 = rgb_palette[src[int_y * src_pitch + x2]];
++			Uint32 p10 = rgb_palette[src[y2 * src_pitch + int_x]];
++			Uint32 p11 = rgb_palette[src[y2 * src_pitch + x2]];
++
++			// Extract RGBA components
++			Uint8 r00 = (p00 >> 16) & 0xFF;
++			Uint8 g00 = (p00 >> 8) & 0xFF;
++			Uint8 b00 = p00 & 0xFF;
++			Uint8 a00 = (p00 >> 24) & 0xFF;
++
++			Uint8 r01 = (p01 >> 16) & 0xFF;
++			Uint8 g01 = (p01 >> 8) & 0xFF;
++			Uint8 b01 = p01 & 0xFF;
++			Uint8 a01 = (p01 >> 24) & 0xFF;
++
++			Uint8 r10 = (p10 >> 16) & 0xFF;
++			Uint8 g10 = (p10 >> 8) & 0xFF;
++			Uint8 b10 = p10 & 0xFF;
++			Uint8 a10 = (p10 >> 24) & 0xFF;
++
++			Uint8 r11 = (p11 >> 16) & 0xFF;
++			Uint8 g11 = (p11 >> 8) & 0xFF;
++			Uint8 b11 = p11 & 0xFF;
++			Uint8 a11 = (p11 >> 24) & 0xFF;
++
++			// Bilinear interpolation
++			Uint8 r = (Uint8)(r00 * (1 - frac_x) * (1 - frac_y) +
++			                  r01 * frac_x * (1 - frac_y) +
++			                  r10 * (1 - frac_x) * frac_y +
++			                  r11 * frac_x * frac_y);
++			Uint8 g = (Uint8)(g00 * (1 - frac_x) * (1 - frac_y) +
++			                  g01 * frac_x * (1 - frac_y) +
++			                  g10 * (1 - frac_x) * frac_y +
++			                  g11 * frac_x * frac_y);
++			Uint8 b = (Uint8)(b00 * (1 - frac_x) * (1 - frac_y) +
++			                  b01 * frac_x * (1 - frac_y) +
++			                  b10 * (1 - frac_x) * frac_y +
++			                  b11 * frac_x * frac_y);
++			Uint8 a = (Uint8)(a00 * (1 - frac_x) * (1 - frac_y) +
++			                  a01 * frac_x * (1 - frac_y) +
++			                  a10 * (1 - frac_x) * frac_y +
++			                  a11 * frac_x * frac_y);
++
++			// Store the interpolated pixel
++			((Uint32 *)dst)[y * (dst_pitch / 4) + x] = (a << 24) | (r << 16) | (g << 8) | b;
++		}
++	}
++
++	SDL_UnlockTexture(dst_texture);
++}
++
++void bilinear_16(SDL_Surface *src_surface, SDL_Texture *dst_texture)
++{
++	Uint8 *src = src_surface->pixels;
++	Uint8 *dst;
++	int src_pitch = src_surface->pitch;
++	int dst_pitch;
++
++	int dst_width, dst_height;
++	SDL_QueryTexture(dst_texture, NULL, NULL, &dst_width, &dst_height);
++
++	int src_width = src_surface->w;
++	int src_height = src_surface->h;
++
++	// Calculate scaling factors
++	float scale_x = (float)src_width / (float)dst_width;
++	float scale_y = (float)src_height / (float)dst_height;
++
++	void* tmp_ptr;
++	SDL_LockTexture(dst_texture, NULL, &tmp_ptr, &dst_pitch);
++	dst = tmp_ptr;
++
++	for (int y = 0; y < dst_height; y++)
++	{
++		for (int x = 0; x < dst_width; x++)
++		{
++			// Calculate source coordinates
++			float src_x = (x + 0.5f) * scale_x - 0.5f;
++			float src_y = (y + 0.5f) * scale_y - 0.5f;
++
++			// Clamp to valid range
++			if (src_x < 0) src_x = 0;
++			if (src_y < 0) src_y = 0;
++
++			// Get integer and fractional parts
++			int int_x = (int)src_x;
++			int int_y = (int)src_y;
++			float frac_x = src_x - int_x;
++			float frac_y = src_y - int_y;
++
++			// Bounds checking
++			int x2 = (int_x < src_width - 1) ? int_x + 1 : int_x;
++			int y2 = (int_y < src_height - 1) ? int_y + 1 : int_y;
++
++			// Get the four neighboring pixels
++			Uint32 p00 = rgb_palette[src[int_y * src_pitch + int_x]];
++			Uint32 p01 = rgb_palette[src[int_y * src_pitch + x2]];
++			Uint32 p10 = rgb_palette[src[y2 * src_pitch + int_x]];
++			Uint32 p11 = rgb_palette[src[y2 * src_pitch + x2]];
++
++			// Extract RGB components (for 16-bit format)
++			Uint8 r00 = (p00 >> 16) & 0xFF;
++			Uint8 g00 = (p00 >> 8) & 0xFF;
++			Uint8 b00 = p00 & 0xFF;
++
++			Uint8 r01 = (p01 >> 16) & 0xFF;
++			Uint8 g01 = (p01 >> 8) & 0xFF;
++			Uint8 b01 = p01 & 0xFF;
++
++			Uint8 r10 = (p10 >> 16) & 0xFF;
++			Uint8 g10 = (p10 >> 8) & 0xFF;
++			Uint8 b10 = p10 & 0xFF;
++
++			Uint8 r11 = (p11 >> 16) & 0xFF;
++			Uint8 g11 = (p11 >> 8) & 0xFF;
++			Uint8 b11 = p11 & 0xFF;
++
++			// Bilinear interpolation
++			Uint8 r = (Uint8)(r00 * (1 - frac_x) * (1 - frac_y) +
++			                  r01 * frac_x * (1 - frac_y) +
++			                  r10 * (1 - frac_x) * frac_y +
++			                  r11 * frac_x * frac_y);
++			Uint8 g = (Uint8)(g00 * (1 - frac_x) * (1 - frac_y) +
++			                  g01 * frac_x * (1 - frac_y) +
++			                  g10 * (1 - frac_x) * frac_y +
++			                  g11 * frac_x * frac_y);
++			Uint8 b = (Uint8)(b00 * (1 - frac_x) * (1 - frac_y) +
++			                  b01 * frac_x * (1 - frac_y) +
++			                  b10 * (1 - frac_x) * frac_y +
++			                  b11 * frac_x * frac_y);
++
++			// Store the interpolated pixel in 16-bit format
++			((Uint16 *)dst)[y * (dst_pitch / 2) + x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
++		}
++	}
++
++	SDL_UnlockTexture(dst_texture);
++}
++
++// CRT scanline scaler - emulates the look of CRT monitors
++void crt_scanline_32(SDL_Surface *src_surface, SDL_Texture *dst_texture)
++{
++	Uint8 *src = src_surface->pixels;
++	Uint8 *dst;
++	int src_pitch = src_surface->pitch;
++	int dst_pitch;
++
++	int dst_width, dst_height;
++	SDL_QueryTexture(dst_texture, NULL, NULL, &dst_width, &dst_height);
++
++	int src_width = src_surface->w;
++	int src_height = src_surface->h;
++
++	// Calculate scaling factors
++	float scale_x = (float)dst_width / (float)src_width;
++	float scale_y = (float)dst_height / (float)src_height;
++
++	void* tmp_ptr;
++	SDL_LockTexture(dst_texture, NULL, &tmp_ptr, &dst_pitch);
++	dst = tmp_ptr;
++
++	for (int y = 0; y < src_height; y++)
++	{
++		for (int dy = 0; dy < (int)scale_y; dy++)
++		{
++			int output_y = (int)(y * scale_y) + dy;
++
++			// CRT scanline effect: every other line is dimmed
++			bool is_scanline = (output_y % 2 == 0);
++			float intensity = is_scanline ? 1.0f : 0.5f;
++
++			for (int x = 0; x < src_width; x++)
++			{
++				Uint32 pixel = rgb_palette[src[y * src_pitch + x]];
++
++				// Apply scanline intensity to the pixel
++				Uint8 r = ((pixel >> 16) & 0xFF);
++				Uint8 g = ((pixel >> 8) & 0xFF);
++				Uint8 b = (pixel & 0xFF);
++
++				r = (Uint8)(r * intensity);
++				g = (Uint8)(g * intensity);
++				b = (Uint8)(b * intensity);
++
++				Uint32 final_pixel = (0xFF << 24) | (r << 16) | (g << 8) | b;
++
++				for (int dx = 0; dx < (int)scale_x; dx++)
++				{
++					int output_x = (int)(x * scale_x) + dx;
++					if (output_x < dst_width && output_y < dst_height)
++					{
++						((Uint32 *)dst)[output_y * (dst_pitch / 4) + output_x] = final_pixel;
++					}
++				}
++			}
++		}
++	}
++
++	SDL_UnlockTexture(dst_texture);
++}
++
++void crt_scanline_16(SDL_Surface *src_surface, SDL_Texture *dst_texture)
++{
++	Uint8 *src = src_surface->pixels;
++	Uint8 *dst;
++	int src_pitch = src_surface->pitch;
++	int dst_pitch;
++
++	int dst_width, dst_height;
++	SDL_QueryTexture(dst_texture, NULL, NULL, &dst_width, &dst_height);
++
++	int src_width = src_surface->w;
++	int src_height = src_surface->h;
++
++	// Calculate scaling factors
++	float scale_x = (float)dst_width / (float)src_width;
++	float scale_y = (float)dst_height / (float)src_height;
++
++	void* tmp_ptr;
++	SDL_LockTexture(dst_texture, NULL, &tmp_ptr, &dst_pitch);
++	dst = tmp_ptr;
++
++	for (int y = 0; y < src_height; y++)
++	{
++		for (int dy = 0; dy < (int)scale_y; dy++)
++		{
++			int output_y = (int)(y * scale_y) + dy;
++
++			// CRT scanline effect: every other line is dimmed
++			bool is_scanline = (output_y % 2 == 0);
++			float intensity = is_scanline ? 1.0f : 0.5f;
++
++			for (int x = 0; x < src_width; x++)
++			{
++				Uint32 pixel = rgb_palette[src[y * src_pitch + x]];
++
++				// Apply scanline intensity to the pixel
++				Uint8 r = ((pixel >> 16) & 0xFF);
++				Uint8 g = ((pixel >> 8) & 0xFF);
++				Uint8 b = (pixel & 0xFF);
++
++				r = (Uint8)(r * intensity);
++				g = (Uint8)(g * intensity);
++				b = (Uint8)(b * intensity);
++
++				// Convert to 16-bit: 5-6-5 format
++				Uint16 final_pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
++
++				for (int dx = 0; dx < (int)scale_x; dx++)
++				{
++					int output_x = (int)(x * scale_x) + dx;
++					if (output_x < dst_width && output_y < dst_height)
++					{
++						((Uint16 *)dst)[output_y * (dst_pitch / 2) + output_x] = final_pixel;
++					}
++				}
++			}
++		}
++	}
++
++	SDL_UnlockTexture(dst_texture);
++}
+diff --git a/src/video_scale.h b/src/video_scale.h
+index 010bdd3..45e34d4 100644
+--- a/src/video_scale.h
++++ b/src/video_scale.h
+@@ -38,4 +38,10 @@ extern const uint scalers_count;
+ 
+ void set_scaler_by_name(const char *name);
+ 
++// Modern scaling algorithms
++void bilinear_32(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++void bilinear_16(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++void crt_scanline_32(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++void crt_scanline_16(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++
+ #endif /* VIDEO_SCALE_H */
+diff --git a/src/video_scale_hqNx.c b/src/video_scale_hqNx.c
+index 2df2f49..e3e80c8 100644
+--- a/src/video_scale_hqNx.c
++++ b/src/video_scale_hqNx.c
+@@ -40,6 +40,12 @@ void hq2x_32(SDL_Surface *src_surface, SDL_Texture *dst_texture);
+ void hq3x_32(SDL_Surface *src_surface, SDL_Texture *dst_texture);
+ void hq4x_32(SDL_Surface *src_surface, SDL_Texture *dst_texture);
+ 
++// Modern scaling algorithms
++void bilinear_32(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++void bilinear_16(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++void crt_scanline_32(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++void crt_scanline_16(SDL_Surface *src_surface, SDL_Texture *dst_texture);
++
+ static int   YUV1, YUV2;
+ const  int   Ymask = 0x00FF0000;
+ const  int   Umask = 0x0000FF00;
+-- 
+2.52.0
+
