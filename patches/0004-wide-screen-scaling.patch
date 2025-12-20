@@ -1,0 +1,12 @@
+diff -r f668773b765b src/video_scale.c
+--- a/src/video_scale.c	Fri Dec 19 11:46:57 2025 +0700
++++ b/src/video_scale.c	Sat Dec 20 09:39:19 2025 +0700
+@@ -53,6 +53,8 @@
+ 	{ 5 * vga_width, 5 * vga_height, bilinear_16, bilinear_32, "Bilinear 5x" },
+ 	{ 3 * vga_width, 3 * vga_height, crt_scanline_16, crt_scanline_32, "CRT 3x" },
+ 	{ 5 * vga_width, 5 * vga_height, crt_scanline_16, crt_scanline_32, "CRT 5x" },
++	{ 6 * vga_width, 5 * vga_height, crt_scanline_16, crt_scanline_32, "wCRT 5x" },
++	{ 8 * vga_width, 7 * vga_height, crt_scanline_16, crt_scanline_32, "wCRT 7x" },
+ };
+ const uint scalers_count = COUNTOF(scalers);
+ 

@@ -7,10 +7,11 @@ License:        GPL-2.0-or-later
 URL:            https://github.com/KScl/opentyrian2000
 Source0:        %{url}/archive/refs/tags/v2000.20250408.tar.gz
 Source1:        https://www.camanis.net/tyrian/tyrian2000.zip
-Patch0:         opentyrian2000-hidpi-support.patch
-Patch1:         opentyrian2000-modern-scaling.patch
-Patch2:         security-fixes.patch
-Patch3:         bilinear-bounds-check.patch
+Patch0:         0000-hidpi-support.patch
+Patch1:         0001-modern-scaling.patch
+Patch2:         0002-security-fixes.patch
+Patch3:         0003-bilinear-bounds-check.patch
+Patch4:         0004-wide-screen-scaling.patch
 
 BuildRequires:  gcc
 BuildRequires:  make
@@ -41,6 +42,7 @@ multiplayer.
 %patch 1 -p1 -b .modern-scaling
 %patch 2 -p1 -b .security-fixes
 %patch 3 -p1 -b .bilinear-bounds
+%patch 4 -p1 -b .wide-screen-scaling
 
 %build
 make prefix=/usr
