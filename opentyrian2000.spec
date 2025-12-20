@@ -1,6 +1,6 @@
 Name:           opentyrian2000
 Version:        2000.2025.04.08
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        An open-source port of the DOS game Tyrian 2000
 
 License:        GPL-2.0-or-later
