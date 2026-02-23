@@ -1,3 +1,7 @@
+This project uses mixed licensing. See README.md for details.
+
+## Packaging License (MIT)
+
 MIT License
 
 Copyright (c) 2025 Chaiwat Suttipongsakul
@@ -19,3 +23,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Other Components
+
+- OpenTyrian2000 source code: GPL-2.0-or-later
+- Game data files: Freeware (see README.md)
